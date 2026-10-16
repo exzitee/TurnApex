@@ -71,15 +71,15 @@ impl TunEngine {
         tokio::spawn(async move {
             use std::io::Write;
             let mut rx_guard = engine_rx.turn_pool.rx_channel_rx.write().await;
-            if let Some(mut rx) = rx_guard.take() {
-                while engine_rx.is_running.load(Ordering::Relaxed) {
-                    if let Some(turn_data) = rx.recv().await {
-                        // Decrypt DTLS
-                        if let Ok(plain_ip) = engine_rx.dtls.decrypt_record(&turn_data) {
-                            engine_rx.stats.record_rx(plain_ip.len() as u64);
-                            let _ = write_file.write_all(&plain_ip);
-                        }
+            while engine_rx.is_running.load(Ordering::Relaxed) {
+                if let Some(turn_data) = rx_guard.recv().await {
+                    // Decrypt DTLS
+                    if let Ok(plain_ip) = engine_rx.dtls.decrypt_record(&turn_data) {
+                        engine_rx.stats.record_rx(plain_ip.len() as u64);
+                        let _ = write_file.write_all(&plain_ip);
                     }
+                } else {
+                    break;
                 }
             }
         });
