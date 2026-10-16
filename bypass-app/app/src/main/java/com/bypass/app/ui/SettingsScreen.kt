@@ -2,38 +2,46 @@ package com.bypass.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.RectangleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material3.*
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bypass.app.ui.theme.*
+import com.bypass.app.ui.theme.TermBlack
+import com.bypass.app.ui.theme.TermBorder
+import com.bypass.app.ui.theme.TermDim
+import com.bypass.app.ui.theme.TermWhite
 
 @Composable
 fun SettingsScreen(
     vpsIp: String,
     vpsPort: String,
     psk: String,
+    turnMode: String = "aggregate",
+    turnServers: List<String> = listOf("turn.vk.com:3478", "turn-ttl.vk.com:3478", "5.255.211.241:3478"),
     isParentsMode: Boolean,
     activeProfile: String,
-    onSaveSettings: (String, String, String, Boolean, String) -> Unit,
+    onSaveSettings: (String, String, String, String, List<String>, Boolean, String) -> Unit,
     onOpenDeployer: () -> Unit,
     onBack: () -> Unit
 ) {
     var ipState by remember { mutableStateOf(vpsIp) }
     var portState by remember { mutableStateOf(vpsPort) }
     var pskState by remember { mutableStateOf(psk) }
+    var modeState by remember { mutableStateOf(turnMode) }
+    val serversList = remember { mutableStateListOf<String>().apply { addAll(turnServers) } }
+    var newServerInput by remember { mutableStateOf("") }
     var parentsModeState by remember { mutableStateOf(isParentsMode) }
     var profileState by remember { mutableStateOf(activeProfile) }
 
@@ -42,247 +50,246 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(OkxBlack)
-            .padding(16.dp)
+            .background(TermBlack)
+            .padding(12.dp)
+            .border(1.dp, TermBorder, RectangleShape)
+            .padding(12.dp)
             .verticalScroll(scrollState)
     ) {
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(OkxSurface2)
-                    .border(1.dp, OkxBorder, RoundedCornerShape(8.dp))
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ArrowBack,
-                    contentDescription = "Назад",
-                    tint = OkxWhite,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = "ПАРАМЕТРЫ TURNAPEX",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Black,
-                color = OkxWhite,
-                letterSpacing = 0.5.sp
-            )
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // VPS Settings Card
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(OkxSurface1)
-                .border(1.dp, OkxBorder, RoundedCornerShape(14.dp))
-                .padding(16.dp)
-        ) {
-            Column {
-                Text(
-                    text = "ПАРАМЕТРЫ СЕРВЕРА (VPS)",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OkxTextSecondary,
-                    letterSpacing = 0.5.sp
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-
-                OutlinedTextField(
-                    value = ipState,
-                    onValueChange = { ipState = it },
-                    label = { Text("IP адрес VPS", color = OkxTextSecondary) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = OkxWhite,
-                        unfocusedTextColor = OkxWhite,
-                        focusedBorderColor = OkxWhite,
-                        unfocusedBorderColor = OkxBorder,
-                        focusedContainerColor = OkxSurface2,
-                        unfocusedContainerColor = OkxSurface2
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                OutlinedTextField(
-                    value = portState,
-                    onValueChange = { portState = it },
-                    label = { Text("UDP порт", color = OkxTextSecondary) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = OkxWhite,
-                        unfocusedTextColor = OkxWhite,
-                        focusedBorderColor = OkxWhite,
-                        unfocusedBorderColor = OkxBorder,
-                        focusedContainerColor = OkxSurface2,
-                        unfocusedContainerColor = OkxSurface2
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                OutlinedTextField(
-                    value = pskState,
-                    onValueChange = { pskState = it },
-                    label = { Text("Секретный ключ (PSK)", color = OkxTextSecondary) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = OkxWhite,
-                        unfocusedTextColor = OkxWhite,
-                        focusedBorderColor = OkxWhite,
-                        unfocusedBorderColor = OkxBorder,
-                        focusedContainerColor = OkxSurface2,
-                        unfocusedContainerColor = OkxSurface2
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
+        // Title
+        Text(
+            text = "╔══ CONFIG ══════════════════════════",
+            color = TermWhite,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp
+        )
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Auto Deploy Card
-        Box(
+        // 1. Turn Mode
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(OkxSurface1)
-                .border(1.dp, OkxBorder, RoundedCornerShape(14.dp))
-                .padding(16.dp)
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(
-                    text = "АВТОДЕПЛОЙ VPS",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OkxTextSecondary,
-                    letterSpacing = 0.5.sp
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Автоматическая установка WireGuard, RTP-демультиплексора и настройка портов на чистом сервере.",
-                    fontSize = 12.sp,
-                    color = OkxTextSecondary
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "1. TURN MODE: ${modeState.uppercase()}",
+                color = TermWhite,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp
+            )
+            TerminalButton(if (modeState == "aggregate") "[TOGGLE: FAILOVER]" else "[TOGGLE: AGGREGATE]") {
+                modeState = if (modeState == "aggregate") "failover" else "aggregate"
+            }
+        }
 
-                Button(
-                    onClick = onOpenDeployer,
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = OkxSurface3)
-                ) {
-                    Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, tint = OkxWhite)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "Развернуть сервер в 1 клик", color = OkxWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        // 2. Profile
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "2. PROFILE: ${profileState.uppercase()}",
+                color = TermWhite,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp
+            )
+            TerminalButton("[SWITCH]") {
+                profileState = when (profileState) {
+                    "home" -> "work"
+                    "work" -> "stealth"
+                    else -> "home"
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Profiles & Parents Mode
-        Box(
+        // 3. Parents mode
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(OkxSurface1)
-                .border(1.dp, OkxBorder, RoundedCornerShape(14.dp))
-                .padding(16.dp)
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(
-                    text = "ПРОФИЛИ И РЕЖИМЫ",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OkxTextSecondary,
-                    letterSpacing = 0.5.sp
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "3. PARENTS MODE: ${if (parentsModeState) "ENABLED" else "DISABLED"}",
+                color = TermWhite,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp
+            )
+            TerminalButton(if (parentsModeState) "[DISABLE]" else "[ENABLE]") {
+                parentsModeState = !parentsModeState
+            }
+        }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf("home", "work", "parents").forEach { prof ->
-                        val isSelected = profileState == prof
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) OkxWhite else OkxSurface2)
-                                .border(1.dp, if (isSelected) OkxWhite else OkxBorder, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = prof.replaceFirstChar { it.uppercase() },
-                                color = if (isSelected) OkxBlack else OkxTextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // VPS Settings
+        Text(
+            text = "── VPS SERVER ──",
+            color = TermWhite,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        TerminalInputField("IP ADDRESS:", ipState) { ipState = it }
+        Spacer(modifier = Modifier.height(6.dp))
+        TerminalInputField("PORT:", portState) { portState = it }
+        Spacer(modifier = Modifier.height(6.dp))
+        TerminalInputField("PSK SECRET:", pskState) { pskState = it }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Turn Servers list
+        Text(
+            text = "── TURN SERVERS (${serversList.size}) ──",
+            color = TermWhite,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        serversList.forEachIndexed { idx, srv ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "[${idx + 1}] $srv",
+                    color = TermWhite,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = "[REMOVE]",
+                    color = TermDim,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    modifier = Modifier.clickable {
+                        if (serversList.size > 1) {
+                            serversList.removeAt(idx)
                         }
                     }
-                }
+                )
+            }
+        }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 14.dp), color = OkxBorder)
+        Spacer(modifier = Modifier.height(6.dp))
 
-                Row(
+        // Add new server input
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .border(1.dp, TermDim, RectangleShape)
+                    .background(TermBlack)
+                    .padding(6.dp)
+            ) {
+                BasicTextField(
+                    value = newServerInput,
+                    onValueChange = { newServerInput = it },
+                    textStyle = TextStyle(
+                        color = TermWhite,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    ),
+                    cursorBrush = SolidColor(TermWhite),
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Режим «Для родителей»",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = OkxWhite
-                        )
-                        Text(
-                            text = "Упрощенный экран с одной кнопкой",
-                            fontSize = 11.sp,
-                            color = OkxTextSecondary
-                        )
+                    decorationBox = { innerTextField ->
+                        if (newServerInput.isEmpty()) {
+                            Text(
+                                text = "host:port",
+                                color = TermDim,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp
+                            )
+                        }
+                        innerTextField()
                     }
-                    Switch(
-                        checked = parentsModeState,
-                        onCheckedChange = { parentsModeState = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = OkxWhite,
-                            checkedTrackColor = OkxGreen
-                        )
-                    )
+                )
+            }
+
+            TerminalButton("[ADD]") {
+                if (newServerInput.isNotBlank()) {
+                    serversList.add(newServerInput.trim())
+                    newServerInput = ""
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        Button(
-            onClick = {
-                onSaveSettings(ipState, portState, pskState, parentsModeState, profileState)
+        // Action Buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            TerminalButton("[S]AVE") {
+                onSaveSettings(
+                    ipState,
+                    portState,
+                    pskState,
+                    modeState,
+                    serversList.toList(),
+                    parentsModeState,
+                    profileState
+                )
                 onBack()
-            },
+            }
+            TerminalButton("[D]EPLOY VPS") {
+                onOpenDeployer()
+            }
+            TerminalButton("[B]ACK") {
+                onBack()
+            }
+        }
+    }
+}
+
+@Composable
+fun TerminalInputField(label: String, value: String, onValueChange: (String) -> Unit) {
+    Column {
+        Text(
+            text = label,
+            color = TermDim,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = OkxGreen)
+                .border(1.dp, TermWhite, RectangleShape)
+                .background(TermBlack)
+                .padding(6.dp)
         ) {
-            Text(text = "СОХРАНИТЬ ИЗМЕНЕНИЯ", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OkxBlack)
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                textStyle = TextStyle(
+                    color = TermWhite,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp
+                ),
+                cursorBrush = SolidColor(TermWhite),
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }

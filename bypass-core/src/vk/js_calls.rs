@@ -536,7 +536,7 @@ fn validated_api_url(value: &str) -> Result<String> {
     Ok(parsed.to_string())
 }
 
-fn join_hash(value: &str) -> Option<&str> {
+pub fn join_hash(value: &str) -> Option<&str> {
     let trimmed = value.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return None;

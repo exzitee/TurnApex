@@ -14,8 +14,11 @@ use crate::{
     vk::profiles::Profile,
     worker::Worker,
 };
+use crate::config::{HashMode, mask_vk_hash};
+use crate::vk::auth::VkAuth;
 use anyhow::{Result, bail};
 use primp::Client;
+use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
     sync::{Arc, RwLock},
@@ -48,6 +51,23 @@ impl From<crate::config::TurnPoolMode> for TurnPoolMode {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VkHash {
+    pub raw: String,
+    pub username: String,    // TURN логин
+    pub password: String,    // TURN пароль
+    pub server: String,      // "turn.vk.com" или "turn-ttl.vk.com"
+    pub port: u16,           // 3478
+    #[serde(skip, default = "default_hash_expiration")]
+    pub expires_at: Instant,
+    pub active_allocations: u32,
+    pub valid: bool,
+}
+
+fn default_hash_expiration() -> Instant {
+    Instant::now() + std::time::Duration::from_secs(3600)
+}
+
 pub struct TurnPoolEntry {
     pub server: String,
     pub core: Arc<NativeCore>,
@@ -60,6 +80,9 @@ pub struct TurnPoolEntry {
 pub struct TurnPool {
     pub servers: Arc<RwLock<Vec<TurnPoolEntry>>>,
     pub mode: Arc<RwLock<TurnPoolMode>>,
+    pub hash_mode: Arc<RwLock<HashMode>>,
+    pub hashes: Arc<RwLock<Vec<VkHash>>>,
+    pub auto_auth: Arc<RwLock<Option<Arc<VkAuth>>>>,
     pub dispatcher: Dispatcher,
     pub primary_index: Arc<TokioRwLock<usize>>,
     pub rx_channel_rx: Arc<TokioRwLock<tokio::sync::mpsc::Receiver<Vec<u8>>>>,
@@ -214,10 +237,16 @@ impl TurnPool {
 
         let (rx_channel_tx, rx_channel_rx) = tokio::sync::mpsc::channel(1024);
         let packet_pool = PacketPool::new(2048);
+        let hash_mode = Arc::new(RwLock::new(HashMode::Auto));
+        let hashes = Arc::new(RwLock::new(Vec::new()));
+        let auto_auth = Arc::new(RwLock::new(None));
 
         Ok(Self {
             servers: Arc::new(RwLock::new(entries)),
             mode: Arc::new(RwLock::new(mode)),
+            hash_mode,
+            hashes,
+            auto_auth,
             dispatcher,
             primary_index: Arc::new(TokioRwLock::new(0)),
             rx_channel_rx: Arc::new(TokioRwLock::new(rx_channel_rx)),
@@ -349,5 +378,152 @@ impl TurnPool {
         error: &VkCaptchaError,
     ) -> Result<String> {
         solver.solve(client, profile, stream_id, error).await
+    }
+
+    pub fn parse_hashes_input(input: &str) -> Vec<String> {
+        input
+            .split([',', ';', '\n', '\r', ' '])
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|token| {
+                if let Some(hash) = crate::vk::js_calls::join_hash(token) {
+                    hash.to_string()
+                } else {
+                    token.to_string()
+                }
+            })
+            .collect()
+    }
+
+    pub fn set_hash_mode(&self, mode: HashMode) {
+        let mut guard = self.hash_mode.write().unwrap();
+        *guard = mode;
+    }
+
+    pub fn get_hash_mode(&self) -> HashMode {
+        *self.hash_mode.read().unwrap()
+    }
+
+    pub fn set_auto_auth(&self, auth: Arc<VkAuth>) {
+        let mut guard = self.auto_auth.write().unwrap();
+        *guard = Some(auth);
+    }
+
+    pub fn get_hashes(&self) -> Vec<VkHash> {
+        self.hashes.read().unwrap().clone()
+    }
+
+    pub async fn update_hashes(&self, hash_strings: &[String]) -> Result<usize> {
+        let mut new_hashes = Vec::new();
+        let auth = { self.auto_auth.read().unwrap().clone() };
+
+        for raw_str in hash_strings {
+            let tokens = Self::parse_hashes_input(raw_str);
+            for token in tokens {
+                let masked = mask_vk_hash(&token);
+                tracing::info!("VK Hash registered: {}", masked);
+
+                let (username, password, server, port) = if let Some(ref a) = auth {
+                    match a.get_credentials(&token, 0).await {
+                        Ok(creds) => {
+                            let srv = creds
+                                .server_addresses
+                                .first()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "turn.vk.com".to_string());
+                            let (host, p) = parse_host_port(&srv, 3478);
+                            (creds.username.to_string(), creds.password.to_string(), host, p)
+                        }
+                        Err(e) => {
+                            tracing::warn!("Credentials lookup failed for hash {}: {}. Defaulting.", masked, e);
+                            ("guest".to_string(), "guest".to_string(), "turn.vk.com".to_string(), 3478)
+                        }
+                    }
+                } else {
+                    ("guest".to_string(), "guest".to_string(), "turn.vk.com".to_string(), 3478)
+                };
+
+                new_hashes.push(VkHash {
+                    raw: token,
+                    username,
+                    password,
+                    server,
+                    port,
+                    expires_at: Instant::now() + std::time::Duration::from_secs(3600),
+                    active_allocations: 1,
+                    valid: true,
+                });
+            }
+        }
+
+        let count = new_hashes.len();
+        {
+            let mut guard = self.hashes.write().unwrap();
+            *guard = new_hashes;
+        }
+        Ok(count)
+    }
+
+    pub async fn check_and_refresh_hashes(&self) -> Vec<(String, bool)> {
+        let now = Instant::now();
+        let mut hashes = { self.hashes.read().unwrap().clone() };
+        let mode = *self.hash_mode.read().unwrap();
+        let mut results = Vec::new();
+        let auth = { self.auto_auth.read().unwrap().clone() };
+
+        for hash in hashes.iter_mut() {
+            let expired = now >= hash.expires_at;
+            let masked = mask_vk_hash(&hash.raw);
+
+            if expired {
+                hash.valid = false;
+                tracing::warn!("VK Hash {} expired!", masked);
+
+                if mode == HashMode::Auto {
+                    if let Some(ref a) = auth {
+                        if let Ok(creds) = a.get_credentials(&hash.raw, 0).await {
+                            hash.username = creds.username.to_string();
+                            hash.password = creds.password.to_string();
+                            hash.expires_at = Instant::now() + std::time::Duration::from_secs(3600);
+                            hash.valid = true;
+                            tracing::info!("VK Hash {} auto-refreshed successfully", masked);
+                        }
+                    }
+                }
+            }
+            results.push((masked, hash.valid));
+        }
+
+        {
+            let mut guard = self.hashes.write().unwrap();
+            *guard = hashes;
+        }
+
+        results
+    }
+
+    pub fn start_hash_watcher(self: &Arc<Self>) {
+        let this = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(600)); // 10 minutes
+            loop {
+                interval.tick().await;
+                let Some(pool) = this.upgrade() else {
+                    break;
+                };
+                if pool.cancel.is_cancelled() {
+                    break;
+                }
+                let _ = pool.check_and_refresh_hashes().await;
+            }
+        });
+    }
+}
+
+fn parse_host_port(server_str: &str, default_port: u16) -> (String, u16) {
+    if let Some((h, p)) = server_str.split_once(':') {
+        (h.to_string(), p.parse().unwrap_or(default_port))
+    } else {
+        (server_str.to_string(), default_port)
     }
 }

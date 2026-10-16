@@ -88,6 +88,12 @@ pub mod jni_exports {
                 .expect("Failed to create TurnPool"),
             );
 
+            pool.set_hash_mode(config.hash_mode.into());
+            if !config.vk_hashes.is_empty() {
+                let _ = pool.update_hashes(&config.vk_hashes).await;
+            }
+            pool.start_hash_watcher();
+
             let dtls = Arc::new(DtlsSession::new_with_psk(&config.vps.psk));
             let health = Arc::new(HealthChecker::new(pool.clone(), config.health_interval_sec));
             health.clone().start();
@@ -200,5 +206,108 @@ pub mod jni_exports {
 
             handle.turn_pool.set_mode(mode);
         }
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_com_bypass_app_BypassCore_nativeUpdateHashes(
+        mut env: JNIEnv,
+        _class: JClass,
+        handle_ptr: jlong,
+        hashes_str: JString,
+    ) -> jint {
+        if handle_ptr == 0 {
+            return -1;
+        }
+
+        let handle = unsafe { &*(handle_ptr as *mut EngineHandle) };
+        if let Ok(s) = env.get_string(&hashes_str) {
+            let str_val: String = s.into();
+            let inputs: Vec<String> = serde_json::from_str(&str_val).unwrap_or_else(|_| vec![str_val]);
+            let count = handle.runtime.block_on(async {
+                handle.turn_pool.update_hashes(&inputs).await.unwrap_or(0)
+            });
+            count as jint
+        } else {
+            -2
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_com_bypass_app_BypassCore_nativeGetHashStatus(
+        env: JNIEnv,
+        _class: JClass,
+        handle_ptr: jlong,
+    ) -> jstring {
+        if handle_ptr == 0 {
+            return env.new_string("[]").unwrap().into_raw();
+        }
+
+        let handle = unsafe { &*(handle_ptr as *mut EngineHandle) };
+        let hashes = handle.turn_pool.get_hashes();
+        let json = serde_json::to_string(&hashes).unwrap_or_else(|_| "[]".to_string());
+        env.new_string(json).unwrap().into_raw()
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_com_bypass_app_BypassCore_nativeSetHashMode(
+        mut env: JNIEnv,
+        _class: JClass,
+        handle_ptr: jlong,
+        mode_str: JString,
+    ) {
+        if handle_ptr == 0 {
+            return;
+        }
+
+        let handle = unsafe { &*(handle_ptr as *mut EngineHandle) };
+        if let Ok(m) = env.get_string(&mode_str) {
+            let m_str: String = m.into();
+            let mode = if m_str.eq_ignore_ascii_case("auto") {
+                crate::config::HashMode::Auto
+            } else {
+                crate::config::HashMode::Manual
+            };
+            handle.turn_pool.set_hash_mode(mode);
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_com_bypass_app_BypassCore_nativeCheckVkHashes(
+        mut env: JNIEnv,
+        _class: JClass,
+        hashes_str: JString,
+    ) -> jstring {
+        if let Ok(s) = env.get_string(&hashes_str) {
+            let str_val: String = s.into();
+            let raw_hashes: Vec<String> = serde_json::from_str(&str_val).unwrap_or_else(|_| vec![str_val]);
+            let clean_hashes: Vec<String> = raw_hashes
+                .iter()
+                .flat_map(|h| crate::turn::pool::TurnPool::parse_hashes_input(h))
+                .collect();
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+
+            if let Ok(runtime) = rt {
+                let checks = runtime.block_on(async {
+                    crate::vk::auth::check_vk_hashes("chrome", &[], &clean_hashes).await
+                });
+
+                let mut results = Vec::new();
+                for (h, check) in checks {
+                    let masked = crate::config::mask_vk_hash(&h);
+                    let valid = matches!(check, crate::vk::auth::VkHashCheck::Valid);
+                    results.push(serde_json::json!({
+                        "hash": h,
+                        "masked": masked,
+                        "valid": valid,
+                    }));
+                }
+                let json = serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string());
+                return env.new_string(json).unwrap().into_raw();
+            }
+        }
+        env.new_string("[]").unwrap().into_raw()
     }
 }

@@ -1,55 +1,89 @@
 package com.bypass.app.ui.theme
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 
-// OKX Design System Tokens
-val OkxBlack = Color(0xFF000000)
-val OkxSurface1 = Color(0xFF0E0E10)
-val OkxSurface2 = Color(0xFF17171A)
-val OkxSurface3 = Color(0xFF222226)
-val OkxBorder = Color(0xFF27272A)
-val OkxBorderLight = Color(0xFF323238)
+// Strict Black & White Terminal Design Tokens
+val TermBlack = Color(0xFF000000)
+val TermWhite = Color(0xFFFFFFFF)
+val TermDim = Color(0xFFAAAAAA)
+val TermBorder = Color(0xFF888888)
 
-val OkxGreen = Color(0xFF00D665)
-val OkxGreenHover = Color(0xFF00F072)
-val OkxGreenBg = Color(0xFF0D2818)
+private val TerminalColorScheme = darkColorScheme(
+    primary = TermWhite,
+    onPrimary = TermBlack,
+    secondary = TermWhite,
+    onSecondary = TermBlack,
+    tertiary = TermWhite,
+    onTertiary = TermBlack,
+    background = TermBlack,
+    surface = TermBlack,
+    surfaceVariant = TermBlack,
+    outline = TermBorder,
+    onBackground = TermWhite,
+    onSurface = TermWhite,
+    onSurfaceVariant = TermDim
+)
 
-val OkxRed = Color(0xFFF6465D)
-val OkxRedBg = Color(0xFF2E1216)
-
-val OkxYellow = Color(0xFFF0A700)
-val OkxWhite = Color(0xFFFFFFFF)
-val OkxTextPrimary = Color(0xFFF4F4F5)
-val OkxTextSecondary = Color(0xFF8E8E93)
-val OkxTextTertiary = Color(0xFF52525B)
-
-private val OkxColorScheme = darkColorScheme(
-    primary = OkxWhite,
-    onPrimary = OkxBlack,
-    secondary = OkxGreen,
-    onSecondary = OkxBlack,
-    tertiary = OkxRed,
-    onTertiary = OkxWhite,
-    background = OkxBlack,
-    surface = OkxSurface1,
-    surfaceVariant = OkxSurface2,
-    outline = OkxBorder,
-    onBackground = OkxTextPrimary,
-    onSurface = OkxTextPrimary,
-    onSurfaceVariant = OkxTextSecondary
+val TerminalTypography = Typography(
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp,
+        color = TermWhite,
+        letterSpacing = 1.sp
+    ),
+    titleMedium = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 16.sp,
+        color = TermWhite,
+        letterSpacing = 0.5.sp
+    ),
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+        color = TermWhite,
+        lineHeight = 20.sp
+    ),
+    bodyMedium = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 13.sp,
+        color = TermWhite,
+        lineHeight = 18.sp
+    ),
+    bodySmall = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Normal,
+        fontSize = 11.sp,
+        color = TermDim,
+        lineHeight = 16.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 11.sp,
+        color = TermWhite
+    )
 )
 
 @Composable
 fun TurnApexTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = OkxColorScheme,
+        colorScheme = TerminalColorScheme,
+        typography = TerminalTypography,
         content = content
     )
 }
 
-// Backward compatibility alias
 @Composable
 fun BypassTheme(content: @Composable () -> Unit) = TurnApexTheme(content)

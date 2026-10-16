@@ -33,6 +33,10 @@ class BypassVpnService : VpnService() {
         private val _statsFlow = MutableStateFlow(TrafficStats())
         val statsFlow: StateFlow<TrafficStats> = _statsFlow
 
+        private val _hashesFlow = MutableStateFlow<List<VkHashItem>>(emptyList())
+        val hashesFlow: StateFlow<List<VkHashItem>> = _hashesFlow
+
+        var activeHandle: Long = 0L
         var currentMode = "aggregate"
         var rtpMasking = true
     }
@@ -98,6 +102,7 @@ class BypassVpnService : VpnService() {
             val res = BypassCore.startTun(engineHandle, tunFd)
             Log.i(TAG, "BypassCore.startTun result: $res")
 
+            activeHandle = engineHandle
             _isRunning.value = true
 
             // 6. Start periodic metrics polling for UI
@@ -113,6 +118,30 @@ class BypassVpnService : VpnService() {
     private fun applySplitTunneling(builder: Builder, configJson: String) {
         try {
             val json = JSONObject(configJson)
+
+            // 1. Direct per-app routes mapping check (priority)
+            val appRoutes = json.optJSONObject("app_routes")
+            if (appRoutes != null && appRoutes.length() > 0) {
+                val keys = appRoutes.keys()
+                while (keys.hasNext()) {
+                    val pkg = keys.next()
+                    val route = appRoutes.optString(pkg, "turn").lowercase()
+                    try {
+                        if (route == "direct") {
+                            builder.addDisallowedApplication(pkg)
+                            Log.d(TAG, "AppRoute: DIRECT bypass for $pkg")
+                        } else if (route == "turn") {
+                            builder.addAllowedApplication(pkg)
+                            Log.d(TAG, "AppRoute: TURN tunnel for $pkg")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "App not installed on device: $pkg")
+                    }
+                }
+                return
+            }
+
+            // 2. Standard split_tunnel fallback
             val split = json.optJSONObject("split_tunnel") ?: return
             val mode = split.optString("mode", "list").lowercase()
 
@@ -154,12 +183,15 @@ class BypassVpnService : VpnService() {
                 delay(1000)
                 val stats = BypassCore.getStats(engineHandle)
                 _statsFlow.value = stats
+                val hashes = BypassCore.getHashes(engineHandle)
+                _hashesFlow.value = hashes
             }
         }
     }
 
     private fun stopVpn() {
         _isRunning.value = false
+        activeHandle = 0L
         statsJob?.cancel()
 
         if (engineHandle != 0L) {

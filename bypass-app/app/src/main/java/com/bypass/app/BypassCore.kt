@@ -1,6 +1,7 @@
 package com.bypass.app
 
 import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class TargetStatus(
@@ -18,6 +19,28 @@ data class TrafficStats(
     val latencyMs: Int = 34,
     val targets: TargetStatus = TargetStatus()
 )
+
+data class VkHashItem(
+    val raw: String,
+    val username: String = "",
+    val password: String = "",
+    val server: String = "turn.vk.com",
+    val port: Int = 3478,
+    val activeAllocations: Int = 0,
+    val valid: Boolean = true
+) {
+    val masked: String
+        get() {
+            val clean = raw.trim()
+            return if (clean.length > 8) {
+                "${clean.substring(0, 4)}...${clean.substring(clean.length - 4)}"
+            } else if (clean.isNotEmpty()) {
+                "****"
+            } else {
+                "—"
+            }
+        }
+}
 
 object BypassCore {
     private const val TAG = "BypassCore"
@@ -38,6 +61,10 @@ object BypassCore {
     private external fun nativeStop(handle: Long)
     private external fun nativeGetStats(handle: Long): String
     private external fun nativeSetMode(handle: Long, mode: String)
+    private external fun nativeUpdateHashes(handle: Long, hashesStr: String): Int
+    private external fun nativeGetHashStatus(handle: Long): String
+    private external fun nativeSetHashMode(handle: Long, mode: String)
+    private external fun nativeCheckVkHashes(hashesStr: String): String
 
     fun initEngine(configJson: String): Long {
         return if (isLibraryLoaded) {
@@ -93,6 +120,70 @@ object BypassCore {
     fun setMode(handle: Long, mode: String) {
         if (isLibraryLoaded && handle != 0L) {
             nativeSetMode(handle, mode)
+        }
+    }
+
+    fun updateHashes(handle: Long, hashes: List<String>): Int {
+        if (!isLibraryLoaded || handle == 0L) return hashes.size
+        return try {
+            val jsonArray = JSONArray(hashes)
+            nativeUpdateHashes(handle, jsonArray.toString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating hashes", e)
+            0
+        }
+    }
+
+    fun getHashes(handle: Long): List<VkHashItem> {
+        if (!isLibraryLoaded || handle == 0L) return emptyList()
+        return try {
+            val jsonStr = nativeGetHashStatus(handle)
+            val array = JSONArray(jsonStr)
+            val list = mutableListOf<VkHashItem>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    VkHashItem(
+                        raw = obj.optString("raw"),
+                        username = obj.optString("username"),
+                        password = obj.optString("password"),
+                        server = obj.optString("server", "turn.vk.com"),
+                        port = obj.optInt("port", 3478),
+                        activeAllocations = obj.optInt("active_allocations", 1),
+                        valid = obj.optBoolean("valid", true)
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing hashes", e)
+            emptyList()
+        }
+    }
+
+    fun setHashMode(handle: Long, mode: String) {
+        if (isLibraryLoaded && handle != 0L) {
+            nativeSetHashMode(handle, mode)
+        }
+    }
+
+    fun checkVkHashes(hashes: List<String>): Map<String, Boolean> {
+        if (!isLibraryLoaded) {
+            return hashes.associateWith { true }
+        }
+        return try {
+            val jsonArray = JSONArray(hashes)
+            val resultStr = nativeCheckVkHashes(jsonArray.toString())
+            val resArray = JSONArray(resultStr)
+            val map = mutableMapOf<String, Boolean>()
+            for (i in 0 until resArray.length()) {
+                val obj = resArray.getJSONObject(i)
+                map[obj.optString("hash")] = obj.optBoolean("valid", false)
+            }
+            map
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking VK hashes", e)
+            hashes.associateWith { false }
         }
     }
 }

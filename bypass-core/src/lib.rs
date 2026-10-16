@@ -32,7 +32,7 @@ pub use protocol as wire_protocol;
 pub use scheduler as striped_scheduler;
 
 // Re-exports from TurnApex core
-pub use config::{AppConfig, SplitTunnelConfig, TunnelMode, VpsConfig};
+pub use config::{AppConfig, HashMode, SplitTunnelConfig, TunnelMode, VpsConfig, mask_vk_hash};
 pub use crypto::DtlsSession;
 pub use dispatcher::Dispatcher;
 pub use fec::{Budget, should_duplicate};
@@ -45,7 +45,7 @@ pub use stats::{TrafficStats, TrafficStatsSnapshot};
 pub use tunnel::{Socks5Server, SplitTunnelMatcher, TunEngine};
 pub use turn::{
     NativeAddress, NativeCore, StunMessage, TurnAllocation, TurnEndpoint, TurnPool, TurnPoolEntry,
-    TurnPoolMode, resolve_turn_endpoints,
+    TurnPoolMode, VkHash, resolve_turn_endpoints,
 };
 pub use vk::captcha::{CaptchaSolver, VkCaptchaError};
 pub use worker::{Worker, run_groups};

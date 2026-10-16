@@ -15,6 +15,30 @@ impl Default for TurnPoolMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+pub enum HashMode {
+    Auto,
+    Manual,
+}
+
+impl Default for HashMode {
+    fn default() -> Self {
+        HashMode::Auto
+    }
+}
+
+pub fn mask_vk_hash(hash: &str) -> String {
+    let clean = hash.trim();
+    if clean.len() > 8 {
+        format!("{}...{}", &clean[..4], &clean[clean.len() - 4..])
+    } else if !clean.is_empty() {
+        "****".to_string()
+    } else {
+        "—".to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TunnelMode {
     All,
     List,
@@ -143,6 +167,12 @@ pub struct AppConfig {
     pub failover_timeout_sec: u64,
     #[serde(default = "default_mtu")]
     pub mtu: u16,
+    #[serde(default)]
+    pub hash_mode: HashMode,
+    #[serde(default)]
+    pub vk_hashes: Vec<String>,
+    #[serde(default)]
+    pub app_routes: std::collections::HashMap<String, String>,
     #[serde(default = "default_n_streams")]
     pub n_streams: usize,
     #[serde(default = "default_profiles")]
@@ -196,6 +226,9 @@ impl Default for AppConfig {
             health_interval_sec: default_health_interval(),
             failover_timeout_sec: default_failover_timeout(),
             mtu: default_mtu(),
+            hash_mode: HashMode::default(),
+            vk_hashes: Vec::new(),
+            app_routes: std::collections::HashMap::new(),
             n_streams: default_n_streams(),
             profiles: default_profiles(),
         }
