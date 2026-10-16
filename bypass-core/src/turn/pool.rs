@@ -1,323 +1,353 @@
-use crate::config::TurnPoolMode;
-use crate::turn::client::{TurnClient, TurnClientState};
-use anyhow::{anyhow, Result};
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+// SPDX-FileCopyrightText: 2026 TurnApex Team
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+use crate::{
+    dispatcher::Dispatcher,
+    obfs::{ObfsCipher, ObfsMode},
+    packet::{PACKET_POOL_PER_WORKER, PacketPool},
+    turn::{
+        allocation::{TurnAllocation, TurnConnectTarget},
+        core::NativeCore,
+        endpoint::TurnTransportMode,
+    },
+    vk::captcha::{CaptchaSolver, VkCaptchaError},
+    vk::profiles::Profile,
+    worker::Worker,
+};
+use anyhow::{Result, bail};
+use primp::Client;
+use std::{
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+    time::Instant,
+};
 use tokio::net::lookup_host;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock as TokioRwLock;
+use tokio_util::sync::CancellationToken;
+
+pub const DEFAULT_TURN_SERVERS: &[&str] = &[
+    "turn.vk.com:3478",
+    "turn-ttl.vk.com:3478",
+    "5.255.211.241:3478",
+];
+
+pub const WORKERS_PER_SERVER: usize = 6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnPoolMode {
+    FAILOVER,  // 1 primary active, N-1 in hot standby
+    AGGREGATE, // all N active concurrently, traffic split round-robin
+}
+
+impl From<crate::config::TurnPoolMode> for TurnPoolMode {
+    fn from(c: crate::config::TurnPoolMode) -> Self {
+        match c {
+            crate::config::TurnPoolMode::Failover => TurnPoolMode::FAILOVER,
+            crate::config::TurnPoolMode::Aggregate => TurnPoolMode::AGGREGATE,
+        }
+    }
+}
+
+pub struct TurnPoolEntry {
+    pub server: String,
+    pub core: Arc<NativeCore>,
+    pub allocation: Arc<TurnAllocation>,
+    pub workers: Vec<Worker>,
+    pub alive: bool,
+    pub latency: u32,
+}
 
 pub struct TurnPool {
+    pub servers: Arc<RwLock<Vec<TurnPoolEntry>>>,
     pub mode: Arc<RwLock<TurnPoolMode>>,
-    pub clients: Arc<RwLock<Vec<Arc<TurnClient>>>>,
-    pub primary_index: Arc<RwLock<usize>>,
-    pub round_robin_counter: AtomicUsize,
-    pub rx_channel_rx: Arc<RwLock<Option<mpsc::Receiver<Vec<u8>>>>>,
-    rx_channel_tx: mpsc::Sender<Vec<u8>>,
-    vps_target: SocketAddr,
-    enable_rtp: bool,
-    is_running: Arc<AtomicBool>,
+    pub dispatcher: Dispatcher,
+    pub primary_index: Arc<TokioRwLock<usize>>,
+    pub rx_channel_rx: Arc<TokioRwLock<tokio::sync::mpsc::Receiver<Vec<u8>>>>,
+    pub rx_channel_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    pub cipher: Arc<ObfsCipher>,
+    pub obfs_mode: ObfsMode,
+    pub cancel: CancellationToken,
+    pub packet_pool: Arc<PacketPool>,
 }
 
 impl TurnPool {
     pub async fn new(
-        server_specs: &[String],
-        vps_target: SocketAddr,
+        servers: Vec<String>,
         mode: TurnPoolMode,
-        enable_rtp: bool,
-    ) -> Result<Arc<Self>> {
-        let (tx, rx) = mpsc::channel(10000);
-
-        let pool = Arc::new(Self {
-            mode: Arc::new(RwLock::new(mode)),
-            clients: Arc::new(RwLock::new(Vec::new())),
-            primary_index: Arc::new(RwLock::new(0)),
-            round_robin_counter: AtomicUsize::new(0),
-            rx_channel_rx: Arc::new(RwLock::new(Some(rx))),
-            rx_channel_tx: tx,
-            vps_target,
-            enable_rtp,
-            is_running: Arc::new(AtomicBool::new(true)),
-        });
-
-        // Resolve DNS and populate pool
-        pool.resolve_and_connect(server_specs).await?;
-
-        // Start background failover / health monitor
-        pool.clone().start_health_monitor();
-
-        Ok(pool)
+        obfs_cipher: Arc<ObfsCipher>,
+        obfs_mode: ObfsMode,
+        username: &str,
+        password: &str,
+        peer_addr: SocketAddr,
+        cancel: CancellationToken,
+    ) -> Result<Self> {
+        Self::create(
+            servers,
+            mode,
+            obfs_cipher,
+            obfs_mode,
+            username,
+            password,
+            peer_addr,
+            cancel,
+        )
+        .await
     }
 
-    /// Resolve all A records for turn.vk.com, turn-ttl.vk.com and connect to all
-    pub async fn resolve_and_connect(&self, server_specs: &[String]) -> Result<()> {
-        let mut target_addrs: Vec<SocketAddr> = Vec::new();
+    pub async fn create(
+        servers: Vec<String>,
+        mode: TurnPoolMode,
+        obfs_cipher: Arc<ObfsCipher>,
+        obfs_mode: ObfsMode,
+        username: &str,
+        password: &str,
+        peer_addr: SocketAddr,
+        cancel: CancellationToken,
+    ) -> Result<Self> {
+        let dispatcher = Dispatcher::new();
+        let mut entries = Vec::new();
+        let target_servers = if servers.is_empty() {
+            DEFAULT_TURN_SERVERS.iter().map(|s| s.to_string()).collect()
+        } else {
+            servers
+        };
 
-        for spec in server_specs {
-            let spec_str = if !spec.contains(':') {
-                format!("{}:3478", spec)
-            } else {
-                spec.clone()
-            };
-
-            match lookup_host(&spec_str).await {
-                Ok(addrs) => {
-                    for addr in addrs {
-                        if !target_addrs.contains(&addr) {
-                            target_addrs.push(addr);
+        let mut resolved_targets = Vec::new();
+        for s in &target_servers {
+            resolved_targets.push(s.clone());
+            if s.starts_with("turn.vk.com") {
+                if let Ok(iter) = lookup_host(s).await {
+                    for addr in iter {
+                        let ip_spec = addr.to_string();
+                        if !resolved_targets.contains(&ip_spec) {
+                            resolved_targets.push(ip_spec);
                         }
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to resolve TURN server {}: {}", spec, e);
+            }
+        }
+
+        let mut worker_id = 0;
+        let mut all_active_senders = Vec::new();
+
+        for server_str in resolved_targets {
+            let socket_addr = match lookup_host(&server_str).await {
+                Ok(mut iter) => match iter.next() {
+                    Some(sa) => sa,
+                    None => continue,
+                },
+                Err(_) => continue,
+            };
+
+            let core = match NativeCore::create(socket_addr, username, password, peer_addr) {
+                Ok(c) => c,
+                Err(err) => {
+                    crate::log_error!("[TURN POOL] NativeCore create failed for {server_str}: {err}");
+                    continue;
                 }
             };
-        }
 
-        // Always ensure fallback static VK TURN IPs are tested
-        let fallback_ips = ["5.255.211.241:3478", "93.186.225.208:3478"];
-        for fallback in fallback_ips {
-            if let Ok(addr) = fallback.parse::<SocketAddr>() {
-                if !target_addrs.contains(&addr) {
-                    target_addrs.push(addr);
+            let target = TurnConnectTarget {
+                address: &server_str,
+                override_host: None,
+                override_port: None,
+                transport_mode: TurnTransportMode::Udp,
+            };
+
+            let pool = PacketPool::new(PACKET_POOL_PER_WORKER * WORKERS_PER_SERVER);
+            let allocation = match TurnAllocation::connect(
+                target,
+                Arc::from(username),
+                Arc::from(password),
+                peer_addr,
+                pool,
+            )
+            .await
+            {
+                Ok(alloc) => {
+                    let _ = alloc.prepare_channel().await;
+                    alloc
                 }
+                Err(err) => {
+                    crate::log_error!("[TURN POOL] Allocation failed for {server_str}: {err}");
+                    continue;
+                }
+            };
+
+            let mut workers = Vec::new();
+            for _ in 0..WORKERS_PER_SERVER {
+                let (w, tx) = Worker::new(
+                    worker_id,
+                    allocation.clone(),
+                    obfs_cipher.clone(),
+                    obfs_mode,
+                    cancel.clone(),
+                );
+                workers.push(w);
+                all_active_senders.push(tx);
+                worker_id += 1;
             }
+
+            entries.push(TurnPoolEntry {
+                server: server_str,
+                core,
+                allocation,
+                workers,
+                alive: true,
+                latency: 20,
+            });
         }
 
-        tracing::info!(
-            "Resolved {} distinct VK TURN server endpoints: {:?}",
-            target_addrs.len(),
-            target_addrs
-        );
-
-        let mut connected_clients = Vec::new();
-
-        for addr in target_addrs {
-            match TurnClient::connect(addr, self.vps_target, self.enable_rtp).await {
-                Ok(client) => {
-                    let client = Arc::new(client);
-                    // Spawn receive loop
-                    tokio::spawn(client.clone().start_receive_loop(self.rx_channel_tx.clone()));
-                    // Spawn refresh worker
-                    tokio::spawn(client.clone().start_refresh_worker());
-
-                    connected_clients.push(client);
-                }
-                Err(e) => {
-                    tracing::warn!("Failed initial connection to TURN {}: {}", addr, e);
-                }
-            }
-        }
-
-        if connected_clients.is_empty() {
-            return Err(anyhow!("Failed to connect to any VK TURN servers"));
-        }
-
-        // Measure initial latencies to pick the fastest as primary
-        let mut best_rtt = u32::MAX;
-        let mut best_idx = 0;
-
-        for (i, c) in connected_clients.iter().enumerate() {
-            if let Ok(rtt) = c.ping().await {
-                if rtt < best_rtt {
-                    best_rtt = rtt;
-                    best_idx = i;
-                }
-            }
-        }
-
-        *self.primary_index.write().await = best_idx;
-        *self.clients.write().await = connected_clients;
-
-        tracing::info!(
-            "TurnPool initialized with {} active servers. Primary index: {} (latency: {}ms)",
-            self.clients.read().await.len(),
-            best_idx,
-            best_rtt
-        );
-
-        Ok(())
-    }
-
-    /// Send a packet according to current mode (FAILOVER vs AGGREGATE)
-    pub async fn send_packet(&self, payload: &[u8]) -> Result<()> {
-        let mode = *self.mode.read().await;
-        let clients = self.clients.read().await;
-
-        if clients.is_empty() {
-            return Err(anyhow!("No TURN clients available in pool"));
+        if entries.is_empty() {
+            bail!("Failed to allocate any TURN servers in pool");
         }
 
         match mode {
-            TurnPoolMode::Failover => {
-                let primary_idx = *self.primary_index.read().await;
-                if let Some(client) = clients.get(primary_idx) {
-                    let is_healthy = *client.state.read().await != TurnClientState::Failed;
-                    if is_healthy {
-                        if let Ok(()) = client.send_packet(payload).await {
-                            return Ok(());
-                        }
-                    }
-                }
-
-                // If primary failed, trigger hot failover (<50ms)
-                drop(clients);
-                self.trigger_failover().await?;
-
-                let clients_guard = self.clients.read().await;
-                let new_idx = *self.primary_index.read().await;
-                if let Some(new_client) = clients_guard.get(new_idx) {
-                    new_client.send_packet(payload).await?;
-                }
+            TurnPoolMode::AGGREGATE => {
+                dispatcher.set_workers(all_active_senders);
             }
-            TurnPoolMode::Aggregate => {
-                // Round-robin dispatch across all healthy streams
-                let healthy_clients: Vec<Arc<TurnClient>> = clients
-                    .iter()
-                    .filter(|c| {
-                        // Healthy or Allocated
-                        let st = c.state.try_read();
-                        if let Ok(guard) = st {
-                            *guard != TurnClientState::Failed
-                        } else {
-                            true
-                        }
-                    })
-                    .cloned()
-                    .collect();
-
-                if healthy_clients.is_empty() {
-                    return Err(anyhow!("All aggregate TURN channels failed"));
-                }
-
-                let idx = self.round_robin_counter.fetch_add(1, Ordering::Relaxed)
-                    % healthy_clients.len();
-                let client = &healthy_clients[idx];
-                client.send_packet(payload).await?;
+            TurnPoolMode::FAILOVER => {
+                let primary_senders = entries[0].workers.iter().map(|w| w.sender.clone()).collect();
+                dispatcher.set_workers(primary_senders);
             }
         }
 
-        Ok(())
+        let (rx_channel_tx, rx_channel_rx) = tokio::sync::mpsc::channel(1024);
+        let packet_pool = PacketPool::new(2048);
+
+        Ok(Self {
+            servers: Arc::new(RwLock::new(entries)),
+            mode: Arc::new(RwLock::new(mode)),
+            dispatcher,
+            primary_index: Arc::new(TokioRwLock::new(0)),
+            rx_channel_rx: Arc::new(TokioRwLock::new(rx_channel_rx)),
+            rx_channel_tx,
+            cipher: obfs_cipher,
+            obfs_mode,
+            cancel,
+            packet_pool,
+        })
     }
 
-    /// Fast hot failover switch (<50ms)
-    pub async fn trigger_failover(&self) -> Result<()> {
-        let clients = self.clients.read().await;
-        let current_primary = *self.primary_index.read().await;
-
-        tracing::warn!(
-            "FAILOVER TRIGGERED: Primary TURN server [#{}] failed or timed out",
-            current_primary
-        );
-
-        // Find fastest alive backup
-        let mut fastest_idx = None;
-        let mut lowest_latency = u32::MAX;
-
-        for (i, c) in clients.iter().enumerate() {
-            if i == current_primary {
-                continue;
-            }
-            let st = *c.state.read().await;
-            if st == TurnClientState::Allocated || st == TurnClientState::Healthy {
-                // Hot backup is already allocated! Instant switch
-                fastest_idx = Some(i);
-                break;
-            }
+    pub fn set_mode(&self, mode: impl Into<TurnPoolMode>) {
+        let m = mode.into();
+        {
+            let mut guard = self.mode.write().unwrap();
+            *guard = m;
         }
-
-        if let Some(new_idx) = fastest_idx {
-            *self.primary_index.write().await = new_idx;
-            tracing::info!(
-                "Failover successful: Switched to hot backup [#{}] ({}) in <50ms",
-                new_idx,
-                clients[new_idx].server_addr
-            );
-            return Ok(());
-        }
-
-        // If none is marked healthy, ping all to find any responsive one
-        for (i, c) in clients.iter().enumerate() {
-            if let Ok(rtt) = c.ping().await {
-                if rtt < lowest_latency {
-                    lowest_latency = rtt;
-                    fastest_idx = Some(i);
-                }
-            }
-        }
-
-        if let Some(new_idx) = fastest_idx {
-            *self.primary_index.write().await = new_idx;
-            tracing::info!(
-                "Failover recovered: Switched to [#{}] ({}) with latency {}ms",
-                new_idx,
-                clients[new_idx].server_addr,
-                lowest_latency
-            );
-            Ok(())
-        } else {
-            Err(anyhow!("All TURN backup servers unreachable"))
-        }
-    }
-
-    /// Continuous health check every 3 seconds
-    fn start_health_monitor(self: Arc<Self>) {
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(3));
-            while self.is_running.load(Ordering::Relaxed) {
-                interval.tick().await;
-
-                let mode = *self.mode.read().await;
-                let clients = self.clients.read().await.clone();
-                let current_primary = *self.primary_index.read().await;
-
-                let mut all_failed = true;
-
-                for (idx, client) in clients.iter().enumerate() {
-                    match client.ping().await {
-                        Ok(rtt) => {
-                            all_failed = false;
-                            *client.state.write().await = TurnClientState::Healthy;
-                            tracing::trace!(
-                                "Health check TURN [#{}] {}: OK ({}ms)",
-                                idx,
-                                client.server_addr,
-                                rtt
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Health check TURN [#{}] {}: TIMEOUT ({})",
-                                idx,
-                                client.server_addr,
-                                e
-                            );
-                            *client.state.write().await = TurnClientState::Failed;
-
-                            if mode == TurnPoolMode::Failover && idx == current_primary {
-                                let _ = self.trigger_failover().await;
-                            }
-                        }
-                    }
-                }
-
-                if all_failed {
-                    tracing::error!("ALL TURN servers down! Waiting 10 seconds before full reconnection...");
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    // Trigger re-resolve
-                    let _ = self.trigger_failover().await;
-                }
-            }
-        });
-    }
-
-    pub async fn set_mode(&self, new_mode: TurnPoolMode) {
-        *self.mode.write().await = new_mode;
-        tracing::info!("TurnPool mode switched to: {:?}", new_mode);
+        self.refresh_dispatcher_workers();
     }
 
     pub fn stop(&self) {
-        self.is_running.store(false, Ordering::Relaxed);
+        self.cancel.cancel();
+    }
+
+    pub async fn send_packet(&self, data: &[u8]) -> Result<()> {
+        let Some(mut packet) = self.packet_pool.try_acquire() else {
+            bail!("Packet pool depleted in send_packet");
+        };
+        packet.set_read_len(data.len())?;
+        packet.as_mut_slice().copy_from_slice(data);
+        self.dispatcher.dispatch(packet).await
+    }
+
+    pub fn refresh_dispatcher_workers(&self) {
+        let mode = *self.mode.read().unwrap();
+        let servers = self.servers.read().unwrap();
+
+        match mode {
+            TurnPoolMode::AGGREGATE => {
+                let mut senders = Vec::new();
+                for entry in servers.iter() {
+                    if entry.alive {
+                        for w in &entry.workers {
+                            senders.push(w.sender.clone());
+                        }
+                    }
+                }
+                self.dispatcher.set_workers(senders);
+            }
+            TurnPoolMode::FAILOVER => {
+                let primary_idx = *self.primary_index.blocking_read();
+                if let Some(primary) = servers.get(primary_idx) {
+                    if primary.alive {
+                        let senders = primary.workers.iter().map(|w| w.sender.clone()).collect();
+                        self.dispatcher.set_workers(senders);
+                        return;
+                    }
+                }
+                drop(servers);
+                let _ = self.failover_to_fastest_backup();
+            }
+        }
+    }
+
+    pub fn failover_to_fastest_backup(&self) -> bool {
+        let mut best_idx = None;
+        let mut best_latency = u32::MAX;
+
+        let servers = self.servers.read().unwrap();
+        for (idx, entry) in servers.iter().enumerate() {
+            if entry.alive && entry.latency < best_latency {
+                best_latency = entry.latency;
+                best_idx = Some(idx);
+            }
+        }
+
+        if let Some(idx) = best_idx {
+            {
+                let mut p = self.primary_index.blocking_write();
+                *p = idx;
+            }
+            let senders = servers[idx].workers.iter().map(|w| w.sender.clone()).collect();
+            self.dispatcher.set_workers(senders);
+            crate::log_output!(
+                "[TURN POOL] Failover switched to {} (latency: {}ms)",
+                servers[idx].server,
+                best_latency
+            );
+            true
+        } else {
+            crate::log_error!("[TURN POOL] Failover failed: no alive backup TURN servers!");
+            false
+        }
+    }
+
+    pub async fn trigger_failover(&self) -> bool {
+        self.failover_to_fastest_backup()
+    }
+
+    pub async fn check_health_and_failover(&self) {
+        let entries = {
+            let guard = self.servers.read().unwrap();
+            guard
+                .iter()
+                .map(|e| (e.server.clone(), e.allocation.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        for (idx, (_, alloc)) in entries.into_iter().enumerate() {
+            let start = Instant::now();
+            let ping_ok = alloc.ping().await.is_ok();
+            let latency = start.elapsed().as_millis().min(u32::MAX as u128) as u32;
+
+            let mut guard = self.servers.write().unwrap();
+            if let Some(entry) = guard.get_mut(idx) {
+                entry.latency = latency;
+                entry.alive = ping_ok;
+            }
+        }
+
+        self.refresh_dispatcher_workers();
+    }
+
+    pub async fn handle_captcha(
+        solver: &CaptchaSolver,
+        client: &Client,
+        profile: &Profile,
+        stream_id: usize,
+        error: &VkCaptchaError,
+    ) -> Result<String> {
+        solver.solve(client, profile, stream_id, error).await
     }
 }

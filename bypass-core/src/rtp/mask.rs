@@ -1,5 +1,4 @@
 use byteorder::{BigEndian, ByteOrder};
-use rand::Rng;
 use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -48,10 +47,11 @@ impl Default for RtpMasker {
 
 impl RtpMasker {
     pub fn new(payload_type: u8) -> Self {
-        let mut rng = rand::thread_rng();
-        let initial_seq: u16 = rng.gen();
-        let initial_ts: u32 = rng.gen();
-        let initial_ssrc: u32 = rng.gen();
+        let mut seed = [0u8; 8];
+        let _ = getrandom::fill(&mut seed);
+        let initial_seq: u16 = u16::from_ne_bytes([seed[0], seed[1]]);
+        let initial_ts: u32 = u32::from_ne_bytes([seed[2], seed[3], seed[4], seed[5]]);
+        let initial_ssrc: u32 = u32::from_ne_bytes([seed[4], seed[5], seed[6], seed[7]]);
 
         Self {
             payload_type,
@@ -73,7 +73,9 @@ impl RtpMasker {
         if should_rotate {
             let mut last = self.last_ssrc_rotation.write().await;
             if now.duration_since(*last) > SSRC_ROTATION_INTERVAL {
-                let new_ssrc: u32 = rand::thread_rng().gen();
+                let mut ssrc_bytes = [0u8; 4];
+                let _ = getrandom::fill(&mut ssrc_bytes);
+                let new_ssrc: u32 = u32::from_ne_bytes(ssrc_bytes);
                 self.ssrc.store(new_ssrc, Ordering::Relaxed);
                 *last = now;
                 tracing::debug!("RTP SSRC rotated to 0x{:08X}", new_ssrc);

@@ -1,7 +1,6 @@
 use byteorder::{BigEndian, ByteOrder};
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -39,7 +38,7 @@ impl DtlsSession {
         let cipher = ChaCha20Poly1305::new(key);
 
         let mut initial_ticket = [0u8; 32];
-        rand::thread_rng().fill(&mut initial_ticket);
+        let _ = getrandom::fill(&mut initial_ticket);
 
         Self {
             cipher,
@@ -132,7 +131,7 @@ impl DtlsSession {
     /// 0-RTT session resumption ticket generation
     pub async fn issue_session_ticket(&self) -> [u8; 32] {
         let mut new_ticket = [0u8; 32];
-        rand::thread_rng().fill(&mut new_ticket);
+        let _ = getrandom::fill(&mut new_ticket);
         *self.session_ticket.write().await = new_ticket;
         new_ticket
     }

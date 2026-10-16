@@ -1,12 +1,17 @@
-use crate::config::{AppConfig, TurnPoolMode};
 use crate::crypto::DtlsSession;
 use crate::health::HealthChecker;
 use crate::stats::TrafficStats;
 use crate::tunnel::tun::TunEngine;
 use crate::turn::TurnPool;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
+
+#[cfg(feature = "android-jni")]
+use crate::config::{AppConfig, TurnPoolMode};
+#[cfg(feature = "android-jni")]
+use crate::obfs::{ObfsCipher, ObfsMode};
+#[cfg(feature = "android-jni")]
+use std::net::SocketAddr;
 
 pub struct EngineHandle {
     pub runtime: Runtime,
@@ -24,7 +29,7 @@ pub mod jni_exports {
     use jni::sys::{jint, jlong, jstring};
     use jni::JNIEnv;
 
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "system" fn Java_com_bypass_app_BypassCore_nativeInit(
         mut env: JNIEnv,
         _class: JClass,
@@ -60,14 +65,28 @@ pub mod jni_exports {
         };
 
         let (turn_pool, dtls, health, stats) = rt.block_on(async {
-            let pool = TurnPool::new(
-                &config.turn_servers,
-                vps_addr,
-                config.mode,
-                config.rtp_masking,
-            )
-            .await
-            .expect("Failed to create TurnPool");
+            let key = crate::wrap::derive_wrap_key(&config.vps.psk).unwrap_or([0u8; 32]);
+            let cipher = Arc::new(ObfsCipher::new(key).unwrap());
+            let obfs_mode = if config.rtp_masking {
+                ObfsMode::Video
+            } else {
+                ObfsMode::Audio
+            };
+
+            let pool = Arc::new(
+                TurnPool::new(
+                    config.turn_servers.clone(),
+                    config.mode.into(),
+                    cipher,
+                    obfs_mode,
+                    "user",
+                    "pass",
+                    vps_addr,
+                    tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+                .expect("Failed to create TurnPool"),
+            );
 
             let dtls = Arc::new(DtlsSession::new_with_psk(&config.vps.psk));
             let health = Arc::new(HealthChecker::new(pool.clone(), config.health_interval_sec));
@@ -91,7 +110,7 @@ pub mod jni_exports {
         Box::into_raw(handle) as jlong
     }
 
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "system" fn Java_com_bypass_app_BypassCore_nativeStartTun(
         _env: JNIEnv,
         _class: JClass,
@@ -121,7 +140,7 @@ pub mod jni_exports {
         0
     }
 
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "system" fn Java_com_bypass_app_BypassCore_nativeStop(
         _env: JNIEnv,
         _class: JClass,
@@ -138,10 +157,9 @@ pub mod jni_exports {
         handle.health_checker.stop();
         handle.turn_pool.stop();
         handle.stats.stop();
-        // Dropping handle drops runtime and cleanly shuts down threads
     }
 
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "system" fn Java_com_bypass_app_BypassCore_nativeGetStats(
         env: JNIEnv,
         _class: JClass,
@@ -160,7 +178,7 @@ pub mod jni_exports {
         env.new_string(json).unwrap().into_raw()
     }
 
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "system" fn Java_com_bypass_app_BypassCore_nativeSetMode(
         mut env: JNIEnv,
         _class: JClass,
@@ -180,9 +198,7 @@ pub mod jni_exports {
                 TurnPoolMode::Aggregate
             };
 
-            handle.runtime.block_on(async {
-                handle.turn_pool.set_mode(mode).await;
-            });
+            handle.turn_pool.set_mode(mode);
         }
     }
 }

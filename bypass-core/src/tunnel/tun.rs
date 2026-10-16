@@ -111,13 +111,11 @@ impl TunEngine {
         let engine_in = self.clone();
         tokio::spawn(async move {
             let mut rx_guard = engine_in.turn_pool.rx_channel_rx.write().await;
-            if let Some(mut rx) = rx_guard.take() {
-                while engine_in.is_running.load(Ordering::Relaxed) {
-                    if let Some(turn_data) = rx.recv().await {
-                        if let Ok(plain_ip) = engine_in.dtls.decrypt_record(&turn_data) {
-                            engine_in.stats.record_rx(plain_ip.len() as u64);
-                            let _ = inbound_tx.send(plain_ip).await;
-                        }
+            while engine_in.is_running.load(Ordering::Relaxed) {
+                if let Some(turn_data) = rx_guard.recv().await {
+                    if let Ok(plain_ip) = engine_in.dtls.decrypt_record(&turn_data) {
+                        engine_in.stats.record_rx(plain_ip.len() as u64);
+                        let _ = inbound_tx.send(plain_ip).await;
                     }
                 }
             }

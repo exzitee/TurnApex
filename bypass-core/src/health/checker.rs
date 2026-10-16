@@ -53,22 +53,13 @@ impl HealthChecker {
             while self.is_running.load(Ordering::Relaxed) {
                 ticker.tick().await;
 
-                // 1. STUN Binding Request & Ping (already partly driven by turn_pool, but we verify primary RTT)
-                let primary_idx = *self.turn_pool.primary_index.read().await;
-                let clients = self.turn_pool.clients.read().await.clone();
-
-                let mut measured_rtt = 0;
-                if let Some(primary) = clients.get(primary_idx) {
-                    match primary.ping().await {
-                        Ok(rtt) => {
-                            measured_rtt = rtt;
-                        }
-                        Err(_) => {
-                            tracing::warn!("Primary health check failed, triggering pool failover");
-                            let _ = self.turn_pool.trigger_failover().await;
-                        }
-                    }
-                }
+                // 1. Check TURN servers health and perform failover if primary dropped
+                self.turn_pool.check_health_and_failover().await;
+                let measured_rtt = {
+                    let servers = self.turn_pool.servers.read().unwrap();
+                    let primary_idx = *self.turn_pool.primary_index.blocking_read();
+                    servers.get(primary_idx).map(|s| s.latency).unwrap_or(35)
+                };
 
                 // 2. TCP connect probes to popular targets (Telegram, Google, YouTube, TikTok)
                 let tg = Self::probe_target("telegram.org:443").await;

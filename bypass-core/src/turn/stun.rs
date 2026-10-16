@@ -1,5 +1,4 @@
 use byteorder::{BigEndian, ByteOrder};
-use rand::Rng;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 pub const STUN_MAGIC_COOKIE: u32 = 0x2112A442;
@@ -69,7 +68,7 @@ impl StunMessage {
 
     pub fn random_transaction_id() -> [u8; 12] {
         let mut id = [0u8; 12];
-        rand::thread_rng().fill(&mut id);
+        let _ = getrandom::fill(&mut id);
         id
     }
 
