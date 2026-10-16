@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- OKX Design System Palette -->
+    <color name="okx_black">#000000</color>
+    <color name="okx_surface_1">#121212</color>
+    <color name="okx_surface_2">#1A1A1A</color>
+    <color name="okx_surface_3">#242424</color>
+    <color name="okx_border">#2C2C2C</color>
+    <color name="okx_green">#00D665</color>
+    <color name="okx_green_bg">#132B1E</color>
+    <color name="okx_red">#F6465D</color>
+    <color name="okx_red_bg">#2D1519</color>
+    <color name="okx_white">#FFFFFF</color>
+    <color name="okx_text_secondary">#8E8E93</color>
+    <color name="okx_text_tertiary">#545458</color>
+</resources>

@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">TurnApex</string>
+    <string name="vpn_channel_name">TurnApex Service Channel</string>
+    <string name="vpn_notification_title">TurnApex • Активен</string>
+    <string name="vpn_notification_text">Трафик защищен и замаскирован через VK TURN</string>
+</resources>

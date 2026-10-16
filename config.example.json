@@ -1,0 +1,57 @@
+{
+  "vps": {
+    "ip": "1.2.3.4",
+    "port": 56000,
+    "ssh_user": "root",
+    "ssh_key": "",
+    "psk": "vk-turn-bypass-secret-v1"
+  },
+  "turn_servers": [
+    "turn.vk.com:3478",
+    "turn-ttl.vk.com:3478",
+    "5.255.211.241:3478"
+  ],
+  "mode": "aggregate",
+  "rtp_masking": true,
+  "split_tunnel": {
+    "mode": "list",
+    "tunnel_apps": [
+      "org.telegram.messenger",
+      "com.google.android.youtube",
+      "com.zhiliaoapp.musically",
+      "com.instagram.android",
+      "com.twitter.android"
+    ],
+    "direct_apps": [
+      "ru.sberbankmobile",
+      "ru.tinkoff.activities",
+      "ru.gosuslugi.portal"
+    ],
+    "tunnel_domains": [
+      "telegram.org",
+      "t.me",
+      "youtube.com",
+      "googlevideo.com",
+      "instagram.com",
+      "twitter.com",
+      "x.com"
+    ],
+    "direct_domains": [
+      "sberbank.ru",
+      "gosuslugi.ru",
+      "tinkoff.ru",
+      "vtb.ru",
+      "yandex.ru",
+      "vk.com"
+    ]
+  },
+  "health_interval_sec": 3,
+  "failover_timeout_sec": 3,
+  "mtu": 1280,
+  "n_streams": 4,
+  "profiles": [
+    "home",
+    "work",
+    "parents"
+  ]
+}
