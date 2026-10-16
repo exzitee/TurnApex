@@ -12,7 +12,7 @@ import com.bypass.app.ui.DashboardScreen
 import com.bypass.app.ui.DeployScreen
 import com.bypass.app.ui.ParentsScreen
 import com.bypass.app.ui.SettingsScreen
-import com.bypass.app.ui.theme.BypassTheme
+import com.bypass.app.ui.theme.TurnApexTheme
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -40,83 +40,88 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TurnApexTheme {
-                val isRunning by BypassVpnService.isRunning.collectAsState()
-                val stats by BypassVpnService.statsFlow.collectAsState()
+                AppContent()
+            }
+        }
+    }
 
-                when (currentScreen) {
-                    "parents" -> {
-                        ParentsScreen(
-                            isRunning = isRunning,
-                            onToggle = { toggleVpn(isRunning) },
-                            onExitParentsMode = {
-                                isParentsMode = false
-                                currentScreen = "dashboard"
-                            }
-                        )
+    @Composable
+    private fun AppContent() {
+        val isRunning by BypassVpnService.isRunning.collectAsState()
+        val stats by BypassVpnService.statsFlow.collectAsState()
+
+        when (currentScreen) {
+            "parents" -> {
+                ParentsScreen(
+                    isRunning = isRunning,
+                    onToggle = { toggleVpn(isRunning) },
+                    onExitParentsMode = {
+                        isParentsMode = false
+                        currentScreen = "dashboard"
                     }
-                    "settings" -> {
-                        SettingsScreen(
-                            vpsIp = vpsIp,
-                            vpsPort = vpsPort,
-                            psk = psk,
-                            isParentsMode = isParentsMode,
-                            activeProfile = activeProfile,
-                            onSaveSettings = { newIp, newPort, newPsk, newParents, newProfile ->
-                                vpsIp = newIp
-                                vpsPort = newPort
-                                psk = newPsk
-                                isParentsMode = newParents
-                                activeProfile = newProfile
-                                if (newParents) {
-                                    currentScreen = "parents"
-                                }
-                            },
-                            onOpenDeployer = { currentScreen = "deploy" },
-                            onBack = {
-                                currentScreen = if (isParentsMode) "parents" else "dashboard"
-                            }
-                        )
-                    }
-                    "deploy" -> {
-                        DeployScreen(
-                            currentIp = vpsIp,
-                            onDeploySuccess = { deployedIp, deployedPort, deployedPsk ->
-                                vpsIp = deployedIp
-                                vpsPort = deployedPort
-                                psk = deployedPsk
-                            },
-                            onBack = { currentScreen = "settings" }
-                        )
-                    }
-                    else -> {
-                        if (isParentsMode) {
-                            ParentsScreen(
-                                isRunning = isRunning,
-                                onToggle = { toggleVpn(isRunning) },
-                                onExitParentsMode = {
-                                    isParentsMode = false
-                                    currentScreen = "dashboard"
-                                }
-                            )
-                        } else {
-                            DashboardScreen(
-                                isRunning = isRunning,
-                                stats = stats,
-                                turnMode = turnMode,
-                                rtpMasking = rtpMasking,
-                                onToggleVpn = { toggleVpn(isRunning) },
-                                onModeChange = { mode ->
-                                    turnMode = mode
-                                    BypassVpnService.currentMode = mode
-                                },
-                                onRtpToggle = { enabled ->
-                                    rtpMasking = enabled
-                                    BypassVpnService.rtpMasking = enabled
-                                },
-                                onOpenSettings = { currentScreen = "settings" }
-                            )
+                )
+            }
+            "settings" -> {
+                SettingsScreen(
+                    vpsIp = vpsIp,
+                    vpsPort = vpsPort,
+                    psk = psk,
+                    isParentsMode = isParentsMode,
+                    activeProfile = activeProfile,
+                    onSaveSettings = { newIp, newPort, newPsk, newParents, newProfile ->
+                        vpsIp = newIp
+                        vpsPort = newPort
+                        psk = newPsk
+                        isParentsMode = newParents
+                        activeProfile = newProfile
+                        if (newParents) {
+                            currentScreen = "parents"
                         }
+                    },
+                    onOpenDeployer = { currentScreen = "deploy" },
+                    onBack = {
+                        currentScreen = if (isParentsMode) "parents" else "dashboard"
                     }
+                )
+            }
+            "deploy" -> {
+                DeployScreen(
+                    currentIp = vpsIp,
+                    onDeploySuccess = { deployedIp, deployedPort, deployedPsk ->
+                        vpsIp = deployedIp
+                        vpsPort = deployedPort
+                        psk = deployedPsk
+                    },
+                    onBack = { currentScreen = "settings" }
+                )
+            }
+            else -> {
+                if (isParentsMode) {
+                    ParentsScreen(
+                        isRunning = isRunning,
+                        onToggle = { toggleVpn(isRunning) },
+                        onExitParentsMode = {
+                            isParentsMode = false
+                            currentScreen = "dashboard"
+                        }
+                    )
+                } else {
+                    DashboardScreen(
+                        isRunning = isRunning,
+                        stats = stats,
+                        turnMode = turnMode,
+                        rtpMasking = rtpMasking,
+                        onToggleVpn = { toggleVpn(isRunning) },
+                        onModeChange = { mode ->
+                            turnMode = mode
+                            BypassVpnService.currentMode = mode
+                        },
+                        onRtpToggle = { enabled ->
+                            rtpMasking = enabled
+                            BypassVpnService.rtpMasking = enabled
+                        },
+                        onOpenSettings = { currentScreen = "settings" }
+                    )
                 }
             }
         }

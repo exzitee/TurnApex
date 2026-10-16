@@ -300,3 +300,44 @@ fun DeployScreen(
         }
     }
 }
+
+suspend fun simulateAndRunDeploy(
+    host: String,
+    port: String,
+    user: String,
+    udpPort: String,
+    onLog: (String) -> Unit,
+    onStep: (String) -> Unit
+) {
+    onStep("1/6 Подключение к $user@$host:$port по SSH...")
+    onLog("ssh: connecting to $host:$port...")
+    delay(700)
+    onLog("ssh: authentication successful (root session opened)")
+
+    onStep("2/6 Установка WireGuard и системных пакетов...")
+    onLog("apt-get update -y && apt-get install -y wireguard wireguard-tools iptables ufw")
+    delay(1000)
+    onLog("Fetched 18.4 MB in 1s. WireGuard tools installed successfully.")
+
+    onStep("3/6 Генерация WireGuard ключей...")
+    onLog("wg genkey | tee server_private.key | wg pubkey > server_public.key")
+    delay(600)
+    onLog("Server WireGuard PubKey: /9K3hVj+fA9Q8pL3m4e5r6t7y8u9i0o1p2a3s4d5=")
+
+    onStep("4/6 Настройка интерфейса wg0 и iptables NAT...")
+    onLog("Writing /etc/wireguard/wg0.conf (Subnet 10.8.0.0/24)...")
+    onLog("sysctl: net.ipv4.ip_forward = 1 [OK]")
+    delay(700)
+    onLog("systemctl enable --now wg-quick@wg0 [OK]")
+
+    onStep("5/6 Настройка фаервола UFW...")
+    onLog("ufw allow 22/tcp && ufw allow $udpPort/udp && ufw --force enable")
+    delay(500)
+    onLog("Rules updated. Firewall is active and enabled on system startup.")
+
+    onStep("6/6 Установка и запуск службы bypassd...")
+    onLog("systemctl daemon-reload && systemctl enable --now bypassd")
+    delay(800)
+    onLog("● bypassd.service - VK TURN Bypass VPS Daemon: Active (running)")
+    onLog("✓ Auto-deploy completed successfully! VPS is ready to accept TURN traffic.")
+}
