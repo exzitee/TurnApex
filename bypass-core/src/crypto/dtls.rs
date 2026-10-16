@@ -108,7 +108,7 @@ impl DtlsSession {
         let epoch = BigEndian::read_u16(&record[3..5]);
         let mut seq_buf = [0u8; 8];
         seq_buf[2..8].copy_from_slice(&record[5..11]);
-        let seq_48 = BigEndian::read_u64(&seq_buf);
+        let _seq_48 = BigEndian::read_u64(&seq_buf);
         let length = BigEndian::read_u16(&record[11..13]) as usize;
 
         if record.len() < DTLS_RECORD_HEADER_SIZE + length {

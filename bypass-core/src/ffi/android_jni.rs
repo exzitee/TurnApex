@@ -21,7 +21,7 @@ pub struct EngineHandle {
 pub mod jni_exports {
     use super::*;
     use jni::objects::{JClass, JString};
-    use jni::sys::{jboolean, jint, jlong, jstring};
+    use jni::sys::{jint, jlong, jstring};
     use jni::JNIEnv;
 
     #[no_mangle]
@@ -96,7 +96,7 @@ pub mod jni_exports {
         _env: JNIEnv,
         _class: JClass,
         handle_ptr: jlong,
-        tun_fd: jint,
+        _tun_fd: jint,
     ) -> jint {
         if handle_ptr == 0 {
             return -1;
@@ -111,7 +111,7 @@ pub mod jni_exports {
 
         #[cfg(target_os = "android")]
         {
-            if let Err(e) = engine.clone().start_android_loop(tun_fd) {
+            if let Err(e) = engine.clone().start_android_loop(_tun_fd) {
                 tracing::error!("Failed to start Android TUN loop: {}", e);
                 return -2;
             }
@@ -131,7 +131,7 @@ pub mod jni_exports {
             return;
         }
 
-        let mut handle = unsafe { Box::from_raw(handle_ptr as *mut EngineHandle) };
+        let handle = unsafe { Box::from_raw(handle_ptr as *mut EngineHandle) };
         if let Some(ref engine) = handle.tun_engine {
             engine.stop();
         }
@@ -143,7 +143,7 @@ pub mod jni_exports {
 
     #[no_mangle]
     pub extern "system" fn Java_com_bypass_app_BypassCore_nativeGetStats(
-        mut env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         handle_ptr: jlong,
     ) -> jstring {

@@ -1,5 +1,6 @@
 use crate::turn::TurnPool;
 use anyhow::{anyhow, Result};
+use byteorder::ByteOrder;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -95,7 +96,7 @@ impl Socks5Server {
         tracing::info!("SOCKS5 forwarding to target: {}", target_dest);
 
         // Connect directly or via tunnel stream
-        let mut target_stream = TcpStream::connect(&target_dest).await?;
+        let target_stream = TcpStream::connect(&target_dest).await?;
 
         // Send success reply
         socket.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await?;

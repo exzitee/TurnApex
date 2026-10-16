@@ -72,7 +72,7 @@ impl TurnPool {
                 Err(e) => {
                     tracing::warn!("Failed to resolve TURN server {}: {}", spec, e);
                 }
-            }
+            };
         }
 
         // Always ensure fallback static VK TURN IPs are tested

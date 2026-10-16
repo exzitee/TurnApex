@@ -1,10 +1,9 @@
 use crate::crypto::DtlsSession;
 use crate::stats::TrafficStats;
 use crate::turn::TurnPool;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub const DEFAULT_MTU: usize = 1280;
 
